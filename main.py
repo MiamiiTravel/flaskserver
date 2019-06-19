@@ -1,127 +1,113 @@
-import pickle
-import json
 from flask import Flask, request, Response
-
-app = Flask(__name__)  
-
-
-def db_read():
-    try:
-        pickle_in = open('data.pickle', 'rb')
-    except IOError:
-        return {}
-    data = pickle.load(pickle_in)  # Загружает объект из файла
-    pickle_in.close()
-    return data
+import os
+import json
 
 
-def db_write(data):
-    pickle_out = open('data.pickle', 'wb')
-    pickle.dump(data, pickle_out)  
-    pickle_out.close()
-
-
-def get_max_id(data):
-    print('get_max_id== ', data)
-    if data:
-        return max(data, key=int)
-    else:
-        return 0
+app = Flask(__name__)
 
 
 def get_all_users():
-    print(request.args)  
-    all_users = db_read()
-    js = json.dumps(all_users) 
-
-    return Response(js, status=200, mimetype='application/json')
+    if os.path.exists('data.json'):
+        with open('data.json', 'r') as data:
+            result = json.load(data)
+        js = json.dumps(result)
+        return Response(js, status=200, mimetype='application/json')
+    else:
+        return Response('{"status": "ERROR", "error": "No data available"}', status=400, mimetype='application/json')
 
 
 def get_user(id):
-    db = db_read()
-    if id in db:
-        result = db[id]
-        result['id'] = id
-        return Response(json.dumps(result), status=200, mimetype='application/json')
-    else:
-        return Response('{"status": "error", "error": "unknown id"}', status=404, mimetype='application/json')
+    try:
+        with open('data.json', 'r') as data:
+            result = json.load(data)
+        return Response(json.dumps(result[id]), status=200, mimetype='application/json')
+    except KeyError:
+        return Response(json.dumps({'status': 'ERROR', 'error': 'The user exists'}),
+                        status=404,
+                        mimetype='application/json')
 
 
 def create_user():
-    try:
-        data = request.args
-    except Exception as e:
-        print(e)
-        return Response({'status': 'ERROR', 'error': e}, status=400)
+    data = request.json
+    print(data)
     if 'name' not in data or 'age' not in data:
-        return Response('{"status": "error","error":"Bad request"}',
-                        status=400,
-                        mimetype='application/json')
-    # example_dict = {'name': 'Ivan', 'age': 33}
-    db = db_read()
-    print('db:  ', db)
-    new_id = get_max_id(db) + 1
-    print('new_id:  ', new_id)
-    db[new_id] = {'name': data['name'], 'age': data['age']}
-    db_write(db)
-    return Response('{"Success": "ok"}',
-                    status=200,
-                    mimetype='application/json')
+        return Response('{"status": "error", "error": "Bad request"}', status=400, mimetype='application/json')
+    with open('data.json', 'r') as result_data:
+        result = json.load(result_data)
+    for js in result:
+        if result[js]['name'] == data['name']:
+            return Response(json.dumps({'status': 'ERROR', 'error': 'The user exists'}),
+                            status=409,
+                            mimetype='application/json')
+    name_id = f'{len(result)+1}'
+    name = data['name']
+    age = data['age']
+    result[name_id] = {'name': name, 'age': age}
+    with open('data.json', 'w') as fh:
+        fh.writelines(json.dumps(result))
+    return Response(json.dumps({'id': name_id, 'name': name, 'age': age}), status=201, mimetype='application/json')
 
 
 def update_user(id):
-    data = request.args
-    if 'name' not in data and 'age' not in data:
-        return Response('{"status": "error", "error": "age of name missing"}', status=400, mimetype='application/json')
-    db = db_read()
-    if id not in db:
-        return Response('{"status": "error", "error": "unknown id"}', status=404, mimetype='application/json')
-    if 'name' in data:
-        db[id]['name'] = data['name']
-    if 'age' in data:
-        db[id]['age'] = data['age']
-    db_write(db)
-    return Response('{"status": "ok"}', status=200, mimetype='application/json')
+    data = request.json
+    print(data)
+    if 'name' not in data or 'age' not in data:
+        return Response('{"status": "error", "error": "Bad request"}', status=400, mimetype='application/json')
+    with open('data.json', 'r') as result_data:
+        result = json.load(result_data)
+    for js in result:
+        if result[js]['name'] == data['name']:
+            return Response(json.dumps({'status': 'ERROR', 'error': 'The user exists'}),
+                            status=409,
+                            mimetype='application/json')
+    name = data['name']
+    age = data['age']
+    result[id] = {'name': name, 'age': age}
+    with open('data.json', 'w') as fh:
+        fh.writelines(json.dumps(result))
+    return Response(json.dumps({'name': name, 'age': age}), status=201, mimetype='application/json')
 
 
 def remove_user(id):
-    db = db_read()
-    if id not in db:
-        return Response('{"status": "error", "error": "unknown id"}', status=404, mimetype='application/json')
-    del db[id]
-    db_write(db)
-    return Response('{"status": "ok"}', status=200, mimetype='application/json')
+    with open('data.json', 'r') as result_data:
+        result = json.load(result_data)
+    try:
+        result.pop(id)
+        with open('data.json', 'w') as fh:
+            fh.writelines(json.dumps(result))
+        return Response(json.dumps({'status': 'ERROR', 'error': f'REMOVED user ID {id}'}),
+                        status=410, mimetype='application/json')
+    except KeyError:
+        return Response(json.dumps({'status': 'ERROR', 'error': 'The user exists'}),
+                        status=404,
+                        mimetype='application/json')
 
 
-def clear_users():
-    db_write({})
-    return Response('{"status": "ok"}', status=200, mimetype='application/json')
+@app.route('/')
+def index():
+    return 'Welcome, user!'
 
 
-@app.route('/users/', methods=['GET', 'POST', 'DELETE'])
+@app.route('/users/', methods=['GET', 'POST'])
 def users():
     if request.method == 'GET':
         return get_all_users()
-    elif request.method == 'DELETE':
-        return clear_users()
     elif request.method == 'POST':
         return create_user()
     else:
         pass
 
 
-@app.route('/users/<id>', methods=['GET', 'POST', 'PATCH', 'DELETE'])
-def user(id):
-    try:
-        id = int(id)
-    except ValueError:
-        return Response('{"status": "error", "error": "invalid id"}', status=400, mimetype='application/json')
+@app.route('/users/<string:id>', methods=['GET', 'PUT', 'DELETE', 'POST'])
+def user_id(id):
     if request.method == 'GET':
         return get_user(id)
-    elif request.method == 'PATCH':
+    elif request.method == 'PUT':
         return update_user(id)
     elif request.method == 'DELETE':
         return remove_user(id)
+    elif request.method == 'POST':
+        return create_user()
     else:
         pass
 
